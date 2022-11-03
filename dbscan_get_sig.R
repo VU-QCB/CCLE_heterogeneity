@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------------------------------------
 # Function for generating gene signatures based on the t.test output of "dbscan_programs"
-# --------------------------------------------------------------------------------------------- 
+# ---------------------------------------------------------------------------------------------
 
 # - dbscan_programs_output = outuput from "dbscan_programs"
 # - cell_line = cell line name
@@ -18,10 +18,10 @@ dbscan_get_sig <- function(dbscan_programs_output, cell_line, max_genes = 50, p_
     a <- lapply(a, function(x) x[x[,"log2.FC."] >= log2_fc & x[,"ttest_p"] < p_val,])
     a <- lapply(a, function(x) rownames(x)[order(x[,"log2.FC."], decreasing = T)][1:max_genes])
     a <- lapply(a, function(x) x[!is.na(x)])
-    
-    meta <-  readRDS("CCLE_heterogeneity_Rfiles/CCLE_metadata.RDS")           
+
+    meta <-  readRDS("smaller_data_files/CCLE_metadata.RDS")
     b <-  dbscan_programs_output[["clusters_cells"]]
     b <-  sapply(b, function(x) (length(x)/meta[cell_line,"n_cells"]) < max_size)
-     
-    return(a[which(b)])             
+
+    return(a[which(b)])
 }

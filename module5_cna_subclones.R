@@ -5,28 +5,41 @@
 # **************************************************************************
 # Basic setup
 
+### Must run "Setup_script.R" prior to executing rest of code to ensure proper output file paths
+### Modify the script, if necessary, to save in different location; default is "~/Desktop/Kinker_output"
+source("Setup_script.R")
+
+
+# Adding Dropbox link to large scRNAseq data file (>425 MB)
+# original file names
+# cell lines: "CCLE_heterogeneity_Rfiles/CCLE_scRNAseq_CPM.RDS"
+# tumors: "CCLE_heterogeneity_Rfiles/tumors_scRNAseq_logTPM.RDS"
+cellline_data_path <- "https://www.dropbox.com/s/p9q50ybyet47utr/CCLE_scRNAseq_CPM.RDS?dl=1"
+tumor_data_path <- "https://www.dropbox.com/s/1z7tyllrj5m0nfh/tumors_scRNAseq_logTPM.RDS?dl=1"
+
+
 # load necessary R packages and functions
 library(mclust)
 
 # read gene locus annotation
-gene_locus <- readRDS("CCLE_heterogeneity_Rfiles/gene_locus.RDS")
+gene_locus <- readRDS("smaller_data_files/gene_locus.RDS")
 
-# read scRNA-seq data (CPM) from cell lines 
-expr_ccle <- readRDS("CCLE_heterogeneity_Rfiles/CCLE_scRNAseq_CPM.RDS")      
-                     
+# read scRNA-seq data from cell lines and tumors
+expr_ccle <- readRDS(url(cellline_data_path))
+
 # select common genes between datasets
 common_genes <- Reduce(intersect, c(lapply(expr_ccle, rownames), list(gene_locus$HGNC.symbol)))
 
 gene_locus <- gene_locus[match(common_genes, gene_locus$HGNC.symbol),]
 expr_ccle <- lapply(expr_ccle, function(x) x[common_genes,])
-                   
+
 # select top expressed genes
-ave_expr <- rowMeans(sapply(expr_ccle, rowMeans))                  
-expr_ccle <- lapply(expr_ccle, function(x) x[order(ave_expr, decreasing = T)[1:7000],])     
-                    
+ave_expr <- rowMeans(sapply(expr_ccle, rowMeans))
+expr_ccle <- lapply(expr_ccle, function(x) x[order(ave_expr, decreasing = T)[1:7000],])
+
 gene_locus <- gene_locus[match(row.names(expr_ccle$NCIH2126_LUNG), gene_locus$HGNC.symbol),]
-                    
-# process data   
+
+# process data
 expr_ccle <- lapply(expr_ccle, function(x) log2((x/10) + 1))
 expr_ccle <- lapply(expr_ccle, function(x) t(t(x)-colMeans(x)))
 ave_expr_log <- rowMeans(sapply(expr_ccle, rowMeans))
@@ -34,17 +47,17 @@ expr_ccle <- lapply(expr_ccle, function(x) x - ave_expr_log)
 
 # **************************************************************************
 # Infer large scale copy number aberrations in chromosome arms
-                    
+
 # truncate expression data
 for(i in names(expr_ccle)) {
   expr_ccle[[i]][expr_ccle[[i]] > 3] <- 3
   expr_ccle[[i]][expr_ccle[[i]] < -3] <- -3
 }
 
-# genes by chromosome location                     
-gene_order <- gene_locus$HGNC.symbol[order(gene_locus$Chromosome.scaffold.name, gene_locus$Karyotype.band)]        
-                    
-# calculate running average expression in windows of 100 genes 
+# genes by chromosome location
+gene_order <- gene_locus$HGNC.symbol[order(gene_locus$Chromosome.scaffold.name, gene_locus$Karyotype.band)]
+
+# calculate running average expression in windows of 100 genes
 cna_infer <- list()
 
 for(i in names(expr_ccle)) {
@@ -54,14 +67,14 @@ for(i in names(expr_ccle)) {
     b[,j] <- colMeans(a[j:(j+99),])
   }
   cna_infer[[i]] <- b
-}                    
-                    
-                    
+}
+
+
 # save
-saveRDS(cna_infer, "Output/module5/cna_infer_ccle.RDS")  
-                 
+saveRDS(cna_infer, file.path(OUTPUT_DIR,"module5/cna_infer_ccle.RDS"))
+
 # determine the limits of each chromosome arm in the inferred cna matrix
-chr_arms_size <- table(gene_locus$chr.arm) # get the number of genes in each chr arm 
+chr_arms_size <- table(gene_locus$chr.arm) # get the number of genes in each chr arm
 chr_arms_size <- chr_arms_size[order(as.numeric(gsub('.{1}$', '', names(chr_arms_size))), names(chr_arms_size))] # order by chr location
 
 window_vs_arm <- c(rep(names(chr_arms_size)[1],chr_arms_size[1]-50)) # annotate the chormosome arm of each window in the inferred cna matrix
@@ -69,20 +82,20 @@ for(i in 2:length(chr_arms_size)) {
   window_vs_arm <- c(window_vs_arm, rep(names(chr_arms_size)[i], (chr_arms_size)[i]))
 }
 window_vs_arm <- window_vs_arm[1:6901]
-                                        
-# average the inferred cna matrix by chromossome arm                                        
+
+# average the inferred cna matrix by chromossome arm
 cna_infer_arm <- lapply(cna_infer, function(x) data.frame(aggregate(t(x), by=list(window_vs_arm), mean), row.names = 1))
 
 # save
-saveRDS(cna_infer_arm, "Output/module5/cna_infer_arm_ccle.RDS" )
+saveRDS(cna_infer_arm, file.path(OUTPUT_DIR,"module5/cna_infer_arm_ccle.RDS"))
 
 # **************************************************************************
-# Detection of arm-level CNA subclones                 
-                        
+# Detection of arm-level CNA subclones
+
 # fit a bimodal Gaussian mixture (via EM algorithm) for each arm in each cell line
 gmm_test <- lapply(cna_infer_arm, function(x) apply(x, 1, function(y) Mclust(y, G=1:2)))
 
-# confindently define cell lines that have subclones (i.e. those with > 20 cells classified into a second mode with > 99% confidence)                                                   
+# confindently define cell lines that have subclones (i.e. those with > 20 cells classified into a second mode with > 99% confidence)
 cna_subclones <- lapply(gmm_test, function(x) lapply(x, function(y) data.frame("class"=y$classification, "uncer" = y$uncertainty)))
 
 for(i in names(cna_subclones)) {
@@ -94,13 +107,13 @@ for(i in names(cna_subclones)) {
 }
 
 cna_subclones <- cna_subclones[sapply(cna_subclones, function(x) length(x)!=0)]
-  
-# save 
-saveRDS(cna_subclones, "Output/module5/cna_subclones_ccle.RDS")                    
-                    
+
+# save
+saveRDS(cna_subclones, file.path(OUTPUT_DIR,"module5/cna_subclones_ccle.RDS"))
+
 # confindently assign cells to clones (only consider cells classified with >90% confidence)
-clone_assignment <- list()     
-                                      
+clone_assignment <- list()
+
 for(i in names(cna_subclones)) {
   if(length(cna_subclones[[i]]) > 1) { # more than one clone - we considered all combinations of modes with at least 5 cells.
     a <- colnames(expr_ccle[[i]])
@@ -123,5 +136,5 @@ for(i in names(cna_subclones)) {
   }
 }
 
-# save 
-saveRDS(clone_assignment, "Output/module5/clone_assignment_ccle.RDS")                                        
+# save
+saveRDS(clone_assignment, file.path(OUTPUT_DIR,"module5/clone_assignment_ccle.RDS"))
